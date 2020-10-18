@@ -68,13 +68,19 @@ enum AppAction: Equatable {
     case toggleState
     case timer(time: Double)
     case increment
+    case printOff
     case team(id: String, action: TeamAction)
+    case teamMembers(id: String, action: TeamMembersAction)
     
     enum TeamAction: Equatable { case game(id: String, action: GameAction) }
     
     enum GameAction: Equatable { case video(id: String, action: VideoAction) }
     
     enum VideoAction: Equatable { case noop }
+    
+    enum TeamMembersAction: Equatable { case member(id: String, action: MemberAction) }
+    
+    enum MemberAction: Equatable { case noop }
 }
 
 struct AppEnvironment { }
@@ -110,9 +116,16 @@ let appReducer = Reducer<AppState, AppAction, AppEnvironment> { state, action, e
     print("appReducer increment time: \(state.masterTime)")
 //    state.teams[id: state.currentTeamId]?.array2[id: state.currentGameId]?.array1[id: state.currentVideoId]?.time += 1
 //    print("appReducer increment: \(state.teams[id: state.currentTeamId]?.array2[id: state.currentGameId]?.array1[id: state.currentVideoId]?.time ?? .zero)")
+    return Effect(value: .printOff)
+
+  case .printOff:
+    printOn = false;
     return .none
     
   case .team:
+    return .none
+    
+  case .teamMembers:
     return .none
   }
 }
@@ -178,25 +191,50 @@ struct MainView: View {
                     .padding(10)
 
                 //   TeamVideoFeature (scope: teams)
-                TeamVideoFeature(store: self.store.scope(state: \.scopeTeams))
+                TeamVideoFeature(store: self.store.scope(state: \.teamVideoFeature))
                     .frame(width: UIScreen.main.bounds.width).background(Color.yellow)
                 
-                TeamMembers(store: self.store.scope(state: \.scopeTeams))
+                TeamsMembers(store: self.store.scope(state: \.teamsMembers))
                     .frame(width: UIScreen.main.bounds.width).background(Color.green)
                 //   Recording (scope: game)
                 //   Phone Sync (scope: game)
                 //   Remote Marking (scope: game)
                 //   Profile View (scope: teams)
-                TheRest(store: self.store.scope(state: \.scopeTeams))
+                TheRest(store: self.store)
            }
         }
     }
 }
 
-struct TeamVideoFeature: View {
-    let store: Store<DeepScopeTeams.State,AppAction>
 
-    init(store: Store<DeepScopeTeams.State,AppAction>) {
+extension AppState {
+    var teamVideoFeature: TeamVideoFeature.State {
+        get {
+            .init(currentTeamId: self.currentTeamId,
+                  currentGameId: self.currentGameId,
+                  currentVideoId: self.currentVideoId,
+                  currentMemberId: self.currentMemberId,
+                  teams: self.teams)
+        }
+        set {
+            self.teams = newValue.teams
+        }
+    }
+}
+
+
+struct TeamVideoFeature: View {
+    let store: Store<State,AppAction>
+
+    struct State: Equatable {
+        let currentTeamId: String
+        let currentGameId: String
+        let currentVideoId: String
+        let currentMemberId: String
+        var teams: IdentifiedArrayOf<GenericEntity>
+    }
+
+    init(store: Store<State,AppAction>) {
         if printOn {
             print("TeamVideoFeature.init called ***************")
         }
@@ -221,26 +259,33 @@ struct TeamVideoFeature: View {
         return WithViewStore(store) { viewStore in
             Text("TeamVideoFeature")
             
-            ScopeTeams(store: self.store) // Teams List of Games-Videos
+            ScopeTeams(store: self.store.scope(state: \.scopeTeams)) // Teams List of Games-Videos
 
             VStack(alignment: .leading) {
-                    Text("Game-Videos Detail View (Edit)")
+                Text("Game-Videos Detail View (Edit)")
                 
                 Text("Interactive Video (Edit)")
-                DeepScopeVideo(store: self.store.scope(state: \.scopeTeam.scopeGames.scopeGame.scopeVideos.scopeVideo))
+                ScopeVideo(store: self.store.scope(state: { $0.teams[id: $0.currentTeamId]!.array2[id: $0.currentGameId]!.array1[id: $0.currentVideoId]! },
+                                                  action: { AppAction.team(id: viewStore.currentTeamId,
+                                                                           action: .game(id: viewStore.currentGameId, action: .video(id: viewStore.currentVideoId, action: $0))) } ))
+                    
                     .background(Color.orange)
                 
                 Text("Full game timeline")
                 HStack(spacing: 1) {
                     //  Timeline (scope: game)
-                    DeepScopeGame(store: self.store.scope(state: \.scopeTeam.scopeGames.scopeGame))
+                    ScopeGame(store: self.store.scope(state: { $0.teams[id: $0.currentTeamId]!.array2[id: $0.currentGameId]! },
+                                                      action: { AppAction.team(id: viewStore.currentTeamId,
+                                                                               action: .game(id: viewStore.currentGameId, action: $0)) } ))
                     Spacer()
                 }
                 
                 Text("Thumnbails for all clips")
                 HStack(spacing: 1) {
                     // Videos List (scope: game)
-                    DeepScopeGame(store: self.store.scope(state: \.scopeTeam.scopeGames.scopeGame))
+                    ScopeGame(store: self.store.scope(state: { $0.teams[id: $0.currentTeamId]!.array2[id: $0.currentGameId]! },
+                                                      action: { AppAction.team(id: viewStore.currentTeamId,
+                                                                               action: .game(id: viewStore.currentGameId, action: $0)) } ))
                     Spacer()
                 }
             }
@@ -248,38 +293,14 @@ struct TeamVideoFeature: View {
     }
 }
 
-struct TeamMembers: View {
-    let store: Store<DeepScopeTeams.State,AppAction>
 
-    init(store: Store<DeepScopeTeams.State,AppAction>) {
-        if printOn {
-            print("TeamVideoFeature.init called ***************")
-        }
-        self.store = store
-    }
 
-    //   Teams List (scope: all)
-    //    - Team (scope: team)
-    //      - Members List (scope: members)
-    //        - Member (scope: member)
-
-    var body: some View {
-        if printOn { print("TeamVideoFeature.body called ***************") }
-        
-        return WithViewStore(store) { viewStore in
-            HStack(spacing: 1) {
-                DeepScopeTeamMembers(store: self.store.scope(state: \.scopeTeam.scopeMembers)) // Teams List of Games-Videos
-                Spacer()
-            }
-        }
-    }
-}
 
 struct TheRest: View {
-    let store: Store<DeepScopeTeams.State,AppAction>
+    let store: Store<AppState,AppAction>
 
-    init(store: Store<DeepScopeTeams.State,AppAction>) {
-        if printOn { print("TeamVideoFeature.init called ***************") }
+    init(store: Store<AppState,AppAction>) {
+        if printOn { print("TheRest.init called ***************") }
         self.store = store
     }
 
@@ -289,7 +310,7 @@ struct TheRest: View {
     //   Profile View (scope: teams)
 
     var body: some View {
-        if printOn { print("TeamVideoFeature.body called ***************") }
+        if printOn { print("TheRest.body called ***************") }
         
         return WithViewStore(store) { viewStore in
             Text("The Rest not implemented for test")
@@ -298,14 +319,10 @@ struct TheRest: View {
 }
 
 
-extension AppState {
-    var scopeTeams: DeepScopeTeams.State {
+extension TeamVideoFeature.State {
+    var scopeTeams: ScopeTeams.State {
         get {
-            .init(currentTeamId: self.currentTeamId,
-                  currentGameId: self.currentGameId,
-                  currentVideoId: self.currentVideoId,
-                  currentMemberId: self.currentMemberId,
-                  teams: self.teams)
+            .init(teams: self.teams)
         }
         set {
             self.teams = newValue.teams
@@ -314,9 +331,13 @@ extension AppState {
 }
 
 struct ScopeTeams: View {
-    let store: Store<DeepScopeTeams.State,AppAction>
+    let store: Store<State,AppAction>
     
-    init(store: Store<DeepScopeTeams.State,AppAction>) {
+    struct State: Equatable {
+        var teams: IdentifiedArrayOf<GenericEntity>
+    }
+    
+    init(store: Store<State,AppAction>) {
         if printOn { print("ScopeTeams.init called ***************") }
         self.store = store
     }
@@ -350,7 +371,7 @@ struct ScopeTeam: View {
         return WithViewStore(store) { viewStore in
             HStack {
                 HStack {
-                    Text("T").foregroundColor(.white)
+                    Text("\(viewStore.id)").foregroundColor(.white)
                     
                     VStack {
                         ForEachStore(self.store.scope(state: { $0.array2 }, action: { AppAction.TeamAction.game(id: $0, action: $1) } )) { game in
@@ -378,7 +399,7 @@ struct ScopeGame: View {
         
         return WithViewStore(store) { viewStore in
             HStack(spacing: 1) {
-                Text("G").foregroundColor(.white).background(Color.blue)
+                Text("\(viewStore.id)").foregroundColor(.white).background(Color.blue)
                 
                 ForEachStore(self.store.scope(state: { $0.array1 }, action: { AppAction.GameAction.video(id: $0, action: $1) } )) { video in
                     ScopeVideo(store: video).background(Color.purple)
@@ -405,112 +426,67 @@ struct ScopeVideo: View {
     }
 }
 
+extension AppState {
+    var teamsMembers: TeamsMembers.State {
+        get {
+            .init(teams: self.teams)
+        }
+        set {
+            self.teams = newValue.teams
+        }
+    }
+}
 
-struct DeepScopeTeams: View {
-    let store: Store<DeepScopeTeams.State,AppAction>
-
+struct TeamsMembers: View {
+    let store: Store<State,AppAction>
+    
     struct State: Equatable {
-        let currentTeamId: String
-        let currentGameId: String
-        let currentVideoId: String
-        let currentMemberId: String
         var teams: IdentifiedArrayOf<GenericEntity>
     }
     
-    init(store: Store<DeepScopeTeams.State,AppAction>) {
-        if printOn { print("DeepScopeTeams.init called ***************") }
+    init(store: Store<State,AppAction>) {
+        if printOn {
+            print("TeamsMembers.init called ***************")
+        }
         self.store = store
     }
-
+    
+    //   Teams List (scope: all)
+    //    - Team (scope: team)
+    //      - Members List (scope: members)
+    //        - Member (scope: member)
+    
     var body: some View {
-        if printOn { print("DeepScopeTeams.body called ***************") }
+        if printOn { print("TeamsMembers.body called ***************") }
         
         return WithViewStore(store) { viewStore in
-            ForEach(viewStore.teams) { team in
-                DeepScopeTeam(store: self.store.scope(state: \.scopeTeam))
+            VStack(alignment: .leading) {
+                Text("Team List of Members")
+                ForEachStore(self.store.scope(state: { $0.teams }, action: { AppAction.teamMembers(id: $0, action: $1) } )) { team in
+                    ScopeTeamMembers(store: team)
+                }
             }
         }
     }
 }
-
-
-
-extension DeepScopeTeams.State {
-    var scopeTeam: DeepScopeTeam.State {
-        get {
-            .init(currentGameId: self.currentGameId,
-                  currentVideoId: self.currentVideoId,
-                  currentMemberId: self.currentMemberId,
-                  team: self.teams[id: self.currentTeamId] ?? GenericEntity())
-        }
-        set {
-            self.teams[id: self.currentTeamId] = newValue.team
-        }
-    }
-}
-
-struct DeepScopeTeam: View {
-    let store: Store<DeepScopeTeam.State,AppAction>
-
-    struct State: Equatable {
-        let currentGameId: String
-        let currentVideoId: String
-        let currentMemberId: String
-        var team: GenericEntity
-    }
     
-    init(store: Store<DeepScopeTeam.State,AppAction>) {
-        if printOn { print("DeepScopeTeam.init called ***************") }
+struct ScopeTeamMembers: View {
+    let store: Store<GenericEntity,AppAction.TeamMembersAction>
+
+    init(store: Store<GenericEntity,AppAction.TeamMembersAction>) {
+        if printOn {
+            print("ScopeTeamMembers.init called ***************")
+        }
         self.store = store
     }
 
     var body: some View {
-        if printOn { print("DeepScopeTeam.body called ***************") }
+        if printOn { print("ScopeTeamMembers.body called ***************") }
         
         return WithViewStore(store) { viewStore in
-            Text("T")
-            
-            DeepScopeGames(store: self.store.scope(state: \.scopeGames))
-        }
-    }
-}
-
-extension DeepScopeTeam.State {
-    var scopeGames: DeepScopeGames.State {
-        get {
-            .init(currentGameId: self.currentGameId,
-                  currentVideoId: self.currentVideoId,
-                  games: self.team.array2)
-        }
-        set {
-            self.team.array2 = newValue.games
-        }
-    }
-}
-
-struct DeepScopeGames: View {
-    let store: Store<DeepScopeGames.State,AppAction>
-
-    struct State: Equatable {
-        let currentGameId: String
-        let currentVideoId: String
-        var games: IdentifiedArrayOf<GenericEntity>
-    }
-    
-    init(store: Store<DeepScopeGames.State,AppAction>) {
-        if printOn { print("DeepScopeGames.init called ***************") }
-        self.store = store
-    }
-
-    var body: some View {
-        if printOn { print("DeepScopeGames.body called ***************") }
-        
-        return WithViewStore(store) { viewStore in
-            Text("Gs")
-            
-            HStack {
-                ForEach(viewStore.games) { game in
-                    DeepScopeGame(store: self.store.scope(state: \.scopeGame))
+            HStack(spacing: 1) {
+                ForEachStore(self.store.scope(state: { $0.array1 }, action: { AppAction.TeamMembersAction.member(id: $0, action: $1) } )) { member in
+                    ScopeTeamMember(store: member)
                 }
                 Spacer()
             }
@@ -518,184 +494,23 @@ struct DeepScopeGames: View {
     }
 }
 
-extension DeepScopeGames.State {
-    var scopeGame: DeepScopeGame.State {
-        get {
-            .init(currentVideoId: self.currentVideoId,
-                  game: self.games[id: self.currentGameId] ?? GenericEntity())
-        }
-        set {
-            self.games[id: self.currentGameId]? = newValue.game
-        }
-    }
-}
-
-struct DeepScopeGame: View {
-    let store: Store<DeepScopeGame.State,AppAction>
-
-    struct State: Equatable {
-        let currentVideoId: String
-        var game: GenericEntity
-    }
-    
-    init(store: Store<DeepScopeGame.State,AppAction>) {
-        if printOn { print("DeepScopeGame.init called ***************") }
-        self.store = store
-    }
-
-    var body: some View {
-        if printOn { print("DeepScopeGame.body called ***************") }
-        
-        return WithViewStore(store) { viewStore in
-            Text("G").background(Color.blue)
-            
-//            ForEachStore(self.store.scope(state: { $0.game.array1 }, action: { AppAction.GameAction.video(id: $0, action: $1) } )) { video in
-//                ScopeVideo(store: video).background(Color.purple)
-//            }
-            DeepScopeVideos(store: self.store.scope(state: \.scopeVideos))
-        }
-    }
-}
-
-
-extension DeepScopeGame.State {
-    var scopeVideos: DeepScopeVideos.State {
-        get {
-            .init(currentVideoId: self.currentVideoId,
-                  videos: self.game.array1)
-        }
-        set {
-            self.game.array1 = newValue.videos
-        }
-    }
-}
-
-
-struct DeepScopeVideos: View {
-    let store: Store<DeepScopeVideos.State,AppAction>
-
-    struct State: Equatable {
-        let currentVideoId: String
-        var videos: IdentifiedArrayOf<GenericEntity>
-    }
-    
-    init(store: Store<DeepScopeVideos.State,AppAction>) {
-        if printOn { print("DeepScopeVideos.init called ***************") }
-        self.store = store
-    }
-
-    var body: some View {
-        if printOn { print("DeepScopeVideos.body called ***************") }
-        
-        return WithViewStore(store) { viewStore in
-            ForEach(viewStore.videos) { video in
-                DeepScopeVideo(store: self.store.scope(state: \.scopeVideo))
-            }
-        }
-    }
-}
-
-extension DeepScopeVideos.State {
-    var scopeVideo: DeepScopeVideo.State {
-        get {
-            .init(video: self.videos[id: self.currentVideoId] ?? GenericEntity())
-        }
-        set {
-            self.videos[id: self.currentVideoId]? = newValue.video
-        }
-    }
-}
-
-
-struct DeepScopeVideo: View {
-    let store: Store<DeepScopeVideo.State,AppAction>
-
-    struct State: Equatable {
-        var video: GenericEntity
-    }
-    
-    init(store: Store<DeepScopeVideo.State,AppAction>) {
-        if printOn { print("DeepScopeVideo.init called ***************") }
-        self.store = store
-    }
-
-    var body: some View {
-        if printOn { print("DeepScopeVideo.body called ***************") }
-        
-        return WithViewStore(store) { viewStore in
-            Text("V").background(Color.orange)
-        }
-    }
-}
-
-
-extension DeepScopeTeam.State {
-    var scopeMembers: DeepScopeTeamMembers.State {
-        get {
-            .init(currentMemberId: self.currentMemberId,
-                  members: self.team.array1)
-        }
-    }
-}
-
-struct DeepScopeTeamMembers: View {
-    let store: Store<DeepScopeTeamMembers.State,AppAction>
-
-    struct State: Equatable {
-        let currentMemberId: String
-        var members: IdentifiedArrayOf<GenericEntity>
-    }
-    
-    init(store: Store<DeepScopeTeamMembers.State,AppAction>) {
-        if printOn { print("DeepScopeTeamMembers.init called ***************") }
-        self.store = store
-    }
-
-    var body: some View {
-        if printOn { print("DeepScopeTeamMembers.body called ***************") }
-        
-        return WithViewStore(store) { viewStore in
-            Text("Ms")
-            
-            HStack {
-                ForEach(viewStore.members) { video in
-                    DeepScopeMember(store: self.store.scope(state: \.scopeMember))
-                }
-                Spacer()
-            }
-        }
-    }
-}
-
-extension DeepScopeTeamMembers.State {
-    var scopeMember: DeepScopeMember.State {
-        get {
-            .init(member: self.members[id: self.currentMemberId]!)
-        }
-        set {
-            self.members[id: self.currentMemberId]? = newValue.member
-        }
-    }
-}
-
-
-struct DeepScopeMember: View {
-    let store: Store<DeepScopeMember.State,AppAction>
+struct ScopeTeamMember: View {
+    let store: Store<GenericEntity,AppAction.MemberAction>
 
     struct State: Equatable {
         var member: GenericEntity
     }
     
-    init(store: Store<DeepScopeMember.State,AppAction>) {
-        if printOn { print("DeepScopeMember.init called ***************") }
+    init(store: Store<GenericEntity,AppAction.MemberAction>) {
+        if printOn { print("ScopeTeamMember.init called ***************") }
         self.store = store
     }
 
     var body: some View {
-        if printOn { print("DeepScopeMember.body called ***************") }
+        if printOn { print("ScopeTeamMember.body called ***************") }
         
         return WithViewStore(store) { viewStore in
-            Text("M")
+            Text("\(viewStore.id)").background(Color.gray)
         }
     }
 }
