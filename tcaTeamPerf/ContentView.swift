@@ -24,7 +24,7 @@ import ComposableArchitecture
 //          - Videos (scope: videos)
 //            - Video (scope: video)
 //    - Game-Videos Detail View (scope: game)
-// *    - Video (scope: video)
+//      - Video (scope: video)
 //      - Timeline (scope: game)
 //        - Edit Trimmer (scope: video)
 //      - Videos List (scope: game)
@@ -37,8 +37,6 @@ import ComposableArchitecture
 //   Remote Marking (scope: game)
 //   Profile View (scope: teams)
 //
-// * Only ViewModel with local state modeled.
-//   One entity's local state Double variable changed every 30 ms
 //
 
 var printOn: Bool = false
@@ -108,18 +106,20 @@ let appReducer = Reducer<AppState, AppAction, AppEnvironment> { state, action, e
     
   case let .timer(time: time):
     state.masterTime = time
+//    state.teams[id: state.currentTeamId]?.array2[id: state.currentGameId]?.array1[id: state.currentVideoId]?.time = time
     return .none
     
   case .increment:
     printOn = true
     state.masterTime += 1
-    print("appReducer increment time: \(state.masterTime)")
+    print("appReducer increment time: \(state.masterTime), printOn = true")
 //    state.teams[id: state.currentTeamId]?.array2[id: state.currentGameId]?.array1[id: state.currentVideoId]?.time += 1
 //    print("appReducer increment: \(state.teams[id: state.currentTeamId]?.array2[id: state.currentGameId]?.array1[id: state.currentVideoId]?.time ?? .zero)")
-    return Effect(value: .printOff)
+    return Effect(value: .printOff).delay(for: .milliseconds(10), scheduler: DispatchQueue.main).eraseToEffect()
 
   case .printOff:
     printOn = false;
+    print("printOn = false")
     return .none
     
   case .team:
@@ -161,6 +161,33 @@ struct ContentView: View {
 }
 
 
+
+let timerMsg =
+"""
+Start/Stop Timer turns on/off a 30ms timer Effect.
+Note: cpu usage 35% for small state (iphone 11)
+Note: cpu usage 100% for big state (iphone 11)
+No elements of state are tracking the time!
+"""
+
+let bigStateMsg =
+"""
+State changes to/from small and big.
+Small:  1 Team, Member, Game, Video
+Big:    2 Teams
+        5 Members/Team
+        5 Games/Team
+        15 Videos/Game
+Total  172 Elements (big)
+Note: "Big state" is really small state. :)
+"""
+
+let incrementMsg =
+"""
+Steps 1 second (and turns printing on).
+Note: hits all .init and .body funcs.
+"""
+
 struct MainView: View {
     let store: Store<AppState,AppAction>
     
@@ -177,18 +204,23 @@ struct MainView: View {
         }
         
         return WithViewStore(store) { viewStore in
-           VStack {
-                // Issue: every time button action fires and .counter is incremented ...
-                // ... all sub-views' .init and .body get invoked (but their scope do not include masterTime!)
-                Button("Increment Timer Value") { viewStore.send(.increment) }
-                    .padding(10)
+           ScrollView {
                 // Issue: when time gets updated every 30msecs ...
                 // ... the cpu% jumps to 92% on iphone 11 in "big state"
+                Text(timerMsg)
                 Button(viewStore.timerOn ? "Stop Timer" : "Start Timer (30 msec)") { viewStore.send(.toggleTimer) }
                     .padding(10)
             
+                Text(bigStateMsg)
                 Button(viewStore.teams.count < 2 ? "Move to Big State" : "Move to Small State") { viewStore.send(.toggleState) }
                     .padding(10)
+            
+                // Issue: every time button action fires and .counter is incremented ...
+                // ... all sub-views' .init and .body get invoked (but their scope do not include masterTime!)
+                Text(incrementMsg)
+                Button("Increment Timer Value") { viewStore.send(.increment) }
+                .padding(10)
+
 
                 //   TeamVideoFeature (scope: teams)
                 TeamVideoFeature(store: self.store.scope(state: \.teamVideoFeature))
